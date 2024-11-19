@@ -15,7 +15,7 @@ On the system you have the files you want to encrypt and put on the USB drive:
 3. Input an encryption password.
 4. Click "Encrypt".
 5. Wait for the file to encrypt (may take a bit for large files).
-6. When done encrypting, click the "Save to USB drive" link.
+6. When done encrypting, click the "Save to your USB drive" link.
 7. A file picker should pop up and you can save the encrypted `.enc` file to your USB drive.
 8. Close the webpage, unmount, and unplug your USB drive, and take it to the other system where you want to transfer the files.
 
