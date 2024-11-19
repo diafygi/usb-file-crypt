@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="icon" href="data:;base64,iVBORw0KGgo="><!-- disable favicon request -->
+        <title>USB File Encryption Tool</title>
+        <style>
+            label { display: block; margin: 1em 0 0.3em; }
+            .error { color: red; }
+        </style>
+    </head>
+    <body>
+        <h1>USB Encrypted File Tool</h1>
+        <p style="max-width: 50em;">
+            This is a static html file that you can put on your USB drive,
+            then open in a browser and use it to encrypt and decrypt files on
+            the USB drive. No external websites or resources are used
+            (i.e. you can use this without internet access).
+        </p>
+
+        <hr style="margin: 1em 0 3em 0;">
+
+        <h2>Encrypt</h2>
+        <label for="encryptFile">Select file <i><b><u>from your local filesystem</u></b></i> to encrypt:</label>
+        <input id="encryptFile" type="file">
+        <label for="encryptPW">Password:</label>
+        <input id="encryptPW" type="password">
+        <button id="encryptButton">Encrypt</button>
+        <span id="encryptStatus"></span>
+
+        <hr style="margin: 3em 0;">
+
+        <h2>Decrypt</h2>
+        <label for="decryptFile">Select file <i><b><u>from your USB drive</u></b></i> to decrypt:</label>
+        <input id="decryptFile" type="file">
+        <label for="decryptPW">Password:</label>
+        <input id="decryptPW" type="password">
+        <button id="decryptButton">Decrypt</button>
+        <span id="decryptStatus"></span>
+
+        <hr style="margin-top: 3em;">
+
+        <small>
+            This website is static, so it can be saved and loaded locally.
+            Just right-click and "Save Page As.."!<br>
+            Released under MIT license |
+            Source code:
+                <a href="https://github.com/diafygi/usb-file-crypt">https://github.com/diafygi/usb-file-crypt</a>
+        </small>
+
+        <script>
+            // prevent memory buildup
+            let latestUrl = null;
+            function clearUrl() {
+                if (latestUrl !== null) {
+                    URL.revokeObjectURL(latestUrl);
+                    latestUrl = null;
+                }
+            }
+
+            // page elements
+            const encryptFile = document.getElementById("encryptFile");
+            const encryptPW = document.getElementById("encryptPW");
+            const encryptButton = document.getElementById("encryptButton");
+            const encryptStatus = document.getElementById("encryptStatus");
+            const decryptFile = document.getElementById("decryptFile");
+            const decryptPW = document.getElementById("decryptPW");
+            const decryptButton = document.getElementById("decryptButton");
+            const decryptStatus = document.getElementById("decryptStatus");
+
+            // encrypt a local file for saving to the USB drive
+            encryptButton.onclick = async (e) => {
+
+                // pending state
+                clearUrl();
+                encryptStatus.classList.remove("error");
+                encryptStatus.innerHTML = "Encrypting...";
+                decryptStatus.innerHTML = "";
+
+                // no file error
+                if (!encryptFile.files.length) {
+                    encryptStatus.classList.add("error");
+                    encryptStatus.innerHTML = "No file selected";
+                    return;
+                }
+
+                // no password error
+                if (!encryptPW.value) {
+                    encryptStatus.classList.add("error");
+                    encryptStatus.innerHTML = "No password provided";
+                    return;
+                }
+
+                // derive a key from the password
+                let iterations, salt, iv, pwKey, aesKey;
+                try {
+                    iterations = 1000000;
+                    salt = window.crypto.getRandomValues(new Uint8Array(16));
+                    iv = window.crypto.getRandomValues(new Uint8Array(12));
+                    pwKey = await window.crypto.subtle.importKey(
+                        "raw",
+                        new TextEncoder().encode(encryptPW.value),
+                        { name: "PBKDF2" },
+                        false,
+                        ["deriveKey"],
+                    );
+                    aesKey = await window.crypto.subtle.deriveKey(
+                        { name: "PBKDF2", hash: "SHA-256", salt: salt, iterations: iterations },
+                        pwKey,
+                        { name: "AES-GCM", length: 256 },
+                        false,
+                        ["encrypt"],
+                    );
+                } catch (err) {
+                    console.log(err);
+                    encryptStatus.classList.add("error");
+                    encryptStatus.innerHTML = "Error using the provided password";
+                    return;
+                }
+
+                // encrypt the file into the following structure:
+                //  < 4 btyes - PBKDF2 number of iterations>
+                //  <16 btyes - PBKDF2 salt>
+                //  <12 btyes - AES-GCM initialization vector>
+                //  <encrypted data>
+                let encryptedBlob;
+                try {
+                    encryptedBlob = new Blob([
+                        (new Uint32Array([iterations])),
+                        salt,
+                        iv,
+                        await window.crypto.subtle.encrypt(
+                            { name: "AES-GCM", iv: iv, tagLength: 128 },
+                            aesKey,
+                            await encryptFile.files[0].arrayBuffer(),
+                        ),
+                    ]);
+                } catch (err) {
+                    console.log(err);
+                    encryptStatus.classList.add("error");
+                    encryptStatus.innerHTML = "Error encrypting the file";
+                    return;
+                }
+
+                // show the encrypted file as a downloadable result
+                latestUrl = URL.createObjectURL(encryptedBlob);
+                encryptStatus.innerHTML = `Encrypted! <a href='#'>Save to your USB drive</a>`;
+                const encryptFileLink = encryptStatus.querySelector("a");
+                encryptFileLink.href = latestUrl;
+                encryptFileLink.download = encryptFile.files[0].name + ".enc";
+            };
+
+            // decrypt a USB file for saving to the local filesystem
+            decryptButton.onclick = async (e) => {
+
+                // pending state
+                clearUrl();
+                decryptStatus.classList.remove("error");
+                decryptStatus.innerHTML = "Decrypting...";
+                encryptStatus.innerHTML = "";
+
+                // no file error
+                if (!decryptFile.files.length) {
+                    decryptStatus.classList.add("error");
+                    decryptStatus.innerHTML = "No file selected";
+                    return;
+                }
+
+                // no password error
+                if (!decryptPW.value) {
+                    decryptStatus.classList.add("error");
+                    decryptStatus.innerHTML = "No password provided";
+                    return;
+                }
+
+                // encrypted file has the following structure:
+                //  < 4 btyes - PBKDF2 number of iterations>
+                //  <16 btyes - PBKDF2 salt>
+                //  <12 btyes - AES-GCM initialization vector>
+                //  <encrypted data>
+                let encFile, iterations, salt, iv;
+                try {
+                    encFile = decryptFile.files[0];
+                    iterations = new Uint32Array(await encFile.slice(0, 4).arrayBuffer());
+                    salt = await encFile.slice(4, 20).arrayBuffer();
+                    iv = await encFile.slice(20, 32).arrayBuffer();
+                } catch (err) {
+                    console.log(err);
+                    decryptStatus.classList.add("error");
+                    decryptStatus.innerHTML = "Error reading encrypted file header";
+                    return;
+                }
+
+                // generate the decryption key from the password, salt, and iv
+                let pwKey, aesKey;
+                try {
+                    pwKey = await window.crypto.subtle.importKey(
+                        "raw",
+                        new TextEncoder().encode(decryptPW.value),
+                        { name: "PBKDF2" },
+                        false,
+                        ["deriveKey"],
+                    );
+                    aesKey = await window.crypto.subtle.deriveKey(
+                        { name: "PBKDF2", hash: "SHA-256", salt: salt, iterations: iterations },
+                        pwKey,
+                        { name: "AES-GCM", length: 256 },
+                        false,
+                        ["decrypt"],
+                    );
+                } catch (err) {
+                    console.log(err);
+                    decryptStatus.classList.add("error");
+                    decryptStatus.innerHTML = "Error using the provided password";
+                    return;
+                }
+
+                // decrypt the file
+                let decryptedBlob;
+                try {
+                    decryptedBlob = new Blob([
+                        await window.crypto.subtle.decrypt(
+                            { name: "AES-GCM", iv: iv, tagLength: 128 },
+                            aesKey,
+                            await encFile.slice(32).arrayBuffer(),
+                        ),
+                    ]);
+                } catch (err) {
+                    console.log(err);
+                    decryptStatus.classList.add("error");
+                    decryptStatus.innerHTML = "Error decrypting the file";
+                    return;
+                }
+
+                // show the decrypted file as a downloadable result
+                latestUrl = URL.createObjectURL(decryptedBlob);
+                decryptStatus.innerHTML = `Decrypted! <a href='#'>Save to local filesystem</a>`;
+                const decryptFileLink = decryptStatus.querySelector("a");
+                decryptFileLink.href = latestUrl;
+                decryptFileLink.download = encFile.name.replace(/\.enc$/, "");
+            };
+        </script>
+    </body>
+</html>
