@@ -1,5 +1,7 @@
 # USB File Encryption Tool
 
+Demo: https://diafygi.github.io/usb-file-crypt/usb_file_crypt.html
+
 This is a standalone HTML file you can put on a USB drive and use it to encrypt and decrypt files on the drive without having to use any special software.
 
 ## How to use
